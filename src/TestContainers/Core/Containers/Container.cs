@@ -16,6 +16,8 @@ namespace TestContainers.Core.Containers
     {
         static readonly UTF8Encoding Utf8EncodingWithoutBom = new UTF8Encoding(false);
         readonly DockerClient _dockerClient;
+        private MultiplexedStream _stream;
+
         string _containerId { get; set; }
         public string DockerImageName { get; set; }
         public int[] ExposedPorts { get; set; }
@@ -38,7 +40,6 @@ namespace TestContainers.Core.Containers
         async Task TryStart()
         {
             var started = await _dockerClient.Containers.StartContainerAsync(_containerId, new ContainerStartParameters());
-
             if (started)
             {
                 using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(_containerId,
@@ -104,6 +105,8 @@ namespace TestContainers.Core.Containers
             var createContainersParams = ApplyConfiguration();
             var containerCreated = await _dockerClient.Containers.CreateContainerAsync(createContainersParams);
 
+
+
             return containerCreated.ID;
         }
 
@@ -117,10 +120,11 @@ namespace TestContainers.Core.Containers
                 Env = EnvironmentVariables?.Select(ev => $"{ev.key}={ev.value}").ToList(),
                 ExposedPorts = exposedPorts.ToDictionary(e => $"{e}/tcp", e => default(EmptyStruct)),
                 Labels = Labels?.ToDictionary(l => l.key, l => l.value),
-                Tty = true,
+                Tty = false,
                 Cmd = Commands,
                 AttachStderr = true,
                 AttachStdout = true,
+                AttachStdin = true,
             };
 
             var bindings = PortBindings?.ToDictionary(p => p.ExposedPort, p => p.PortBinding) ?? exposedPorts.ToDictionary(e => e, e => e);
@@ -162,11 +166,14 @@ namespace TestContainers.Core.Containers
                 AttachStderr = true,
                 AttachStdout = true,
                 Cmd = command,
+
+                //AttachStdin = true,
+                //Tty = true,
             };
 
             var response = await _dockerClient.Containers.ExecCreateContainerAsync(_containerId, containerExecCreateParams);
 
-            await _dockerClient.Containers.StartContainerExecAsync(_containerId);
+            await _dockerClient.Containers.StartContainerExecAsync(response.ID);
         }
 
         public string GetDockerHostIpAddress()
@@ -187,6 +194,48 @@ namespace TestContainers.Core.Containers
                 default:
                     return null;
             }
+        }
+
+        public async Task ExecInRunnningContainer2(string command, CancellationToken cancellationToken = default)
+        {
+            var config = new ContainerAttachParameters
+            {
+                Stream = false,
+                Stderr = true,
+                Stdin = true,
+                Stdout = true
+            };
+
+            var buffer = new byte[1024];
+            using (var stream = await _dockerClient.Containers.AttachContainerAsync(_containerId, true, config, cancellationToken))
+            {                
+                var writerBuffer = Encoding.ASCII.GetBytes(command + "\n");
+                await stream.WriteAsync(writerBuffer, 0, writerBuffer.Length, cancellationToken);
+
+                var result = await stream.ReadOutputAsync(buffer, 0, buffer.Length, cancellationToken);
+                do
+                {
+                    Console.Write(Encoding.UTF8.GetString(buffer, 0, result.Count));
+                }
+                while (!result.EOF);
+            }
+
+            Console.WriteLine("Worked!");
+        }
+
+        public async Task ExecInRunnningContainer(string command, CancellationToken cancellationToken = default)
+        {
+            var writerBuffer = Encoding.ASCII.GetBytes(command + "\n");
+            await _stream.WriteAsync(writerBuffer, 0, writerBuffer.Length, cancellationToken);
+
+            var buffer = new byte[1024];
+            var result = await _stream.ReadOutputAsync(buffer, 0, buffer.Length, cancellationToken);
+            do
+            {
+                Console.Write(Encoding.UTF8.GetString(buffer, 0, result.Count));
+            }
+            while (!result.EOF);
+
         }
     }
 }

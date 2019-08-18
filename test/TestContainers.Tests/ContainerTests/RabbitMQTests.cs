@@ -9,7 +9,7 @@ namespace TestContainers.Tests.ContainerTests
     public class RabbitMQFixture : IAsyncLifetime
     {
         public IConnection Connection => Container.Connection;
-        RabbitMQContainer Container { get; }
+        public RabbitMQContainer Container { get; }
 
         public RabbitMQFixture() =>
             Container = new GenericContainerBuilder<RabbitMQContainer>()
@@ -21,6 +21,13 @@ namespace TestContainers.Tests.ContainerTests
         public Task InitializeAsync() => Container.Start();
 
         public Task DisposeAsync() => Container.Stop();
+
+        //public async Task ExecBashCommand(string cmd)
+        //{
+        //    await Container.ExecInRunnningContainer(cmd);
+        //}
+
+        
     }
 
     public class RabbitMQTests : IClassFixture<RabbitMQFixture>
@@ -30,11 +37,13 @@ namespace TestContainers.Tests.ContainerTests
         public RabbitMQTests(RabbitMQFixture fixture) => _fixture = fixture;
 
         [Fact]
-        public void OpenModelTest()
+        public async Task OpenModelTest()
         {
             var model = _fixture.Connection.CreateModel();
 
             Assert.True(model.IsOpen);
+
+            await _fixture.Container.ExecuteCommand(new[] { "rabbitmq-plugins", "enable", "rabbitmq_consistent_hash_exchange" });
         }
     }
 }
